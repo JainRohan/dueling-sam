@@ -1,0 +1,1 @@
+# In a simple setting compare traditional SAM vs Dueling SAM (replacing the gradient with dueling feedback)
