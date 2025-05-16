@@ -30,8 +30,8 @@ def get_cifar_data(dataset='cifar10', batch_size=128):
                                               download=False, transform=transform_test)
         num_classes = 100
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
-    testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
+    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=8)
+    testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=8)
 
     return trainloader, testloader, num_classes
 
@@ -44,15 +44,26 @@ def train(model, trainloader, optimizer, criterion, device):
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         
-        # First forward-backward pass
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.first_step(zero_grad=True)
+        # Check if we're using SAM
+        is_sam = hasattr(optimizer, 'first_step')
         
-        # Second forward-backward pass
-        criterion(model(inputs), targets).backward()
-        optimizer.second_step(zero_grad=True)
+        if is_sam:
+            # SAM training
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.first_step(zero_grad=True)
+            
+            # Second forward-backward pass
+            criterion(model(inputs), targets).backward()
+            optimizer.second_step(zero_grad=True)
+        else:
+            # Regular training
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
         
         train_loss += loss.item()
         _, predicted = outputs.max(1)
