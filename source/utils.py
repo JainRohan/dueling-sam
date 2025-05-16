@@ -24,10 +24,10 @@ def get_cifar_data(dataset='cifar10', batch_size=128):
                                              download=True, transform=transform_test)
         num_classes = 10
     else:
-        trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
-                                               download=True, transform=transform_train)
-        testset = torchvision.datasets.CIFAR100(root='./data', train=False,
-                                              download=True, transform=transform_test)
+        trainset = torchvision.datasets.CIFAR100(root='/home/rohan/narval_checkpoints_march_2025/rjain/cifar100/cifar-100-python/', train=True,
+                                               download=False, transform=transform_train)
+        testset = torchvision.datasets.CIFAR100(root='/home/rohan/narval_checkpoints_march_2025/rjain/cifar100/cifar-100-python/', train=False,
+                                              download=False, transform=transform_test)
         num_classes = 100
 
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
@@ -41,7 +41,7 @@ def train(model, trainloader, optimizer, criterion, device):
     correct = 0
     total = 0
     
-    for batch_idx, (inputs, targets) in enumerate(tqdm(trainloader)):
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         
         # First forward-backward pass

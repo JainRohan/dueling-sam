@@ -4,6 +4,7 @@ import torch
 import torch.optim as optim
 from models import ResNet18
 from utils import get_cifar_data, train, test
+from tqdm import tqdm
 
 class SAM(optim.Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
@@ -47,8 +48,8 @@ class SAM(optim.Optimizer):
 
 def main():
     # Hyperparameters
-    dataset = 'cifar10'  # or 'cifar100'
-    batch_size = 128
+    dataset = 'cifar100'  # or 'cifar100'
+    batch_size = 256
     epochs = 200
     rho = 0.05
     learning_rate = 0.1
@@ -68,16 +69,20 @@ def main():
     # Learning rate scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=epochs)
     
+    print("\nTraining Progress:")
+    pbar = tqdm(total=epochs, position=0)
+    
     # Training loop
     for epoch in range(epochs):
         train_loss, train_acc = train(model, trainloader, optimizer, criterion, device)
         test_loss, test_acc = test(model, testloader, criterion, device)
         
-        print(f'Epoch: {epoch+1}/{epochs}')
-        print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
-        print(f'Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
+        print(f'Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
         
+        pbar.update(1)
         scheduler.step()
+    
+    pbar.close()
 
 if __name__ == '__main__':
     main()
