@@ -5,6 +5,8 @@ import torch.optim as optim
 from models import ResNet18
 from utils import get_cifar_data, train, test
 from tqdm import tqdm
+import os
+from datetime import datetime
 
 class SAM(optim.Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
@@ -46,7 +48,15 @@ class SAM(optim.Optimizer):
         )
         return norm
 
-def main():
+def main(use_sam=True):
+    outputs_dir = os.path.join(os.path.dirname(__file__), 'outputs')
+    os.makedirs(outputs_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_name = f"{timestamp}_sam{use_sam}"
+    run_dir = os.path.join(outputs_dir, run_name)
+    os.makedirs(run_dir, exist_ok=True)
+    
     # Hyperparameters
     dataset = 'cifar100'  # or 'cifar100'
     batch_size = 256
@@ -61,21 +71,36 @@ def main():
     # Initialize model
     model = ResNet18(num_classes=num_classes).to(device)
     
-    # Initialize optimizer and criterion
-    base_optimizer = optim.SGD
-    optimizer = SAM(model.parameters(), base_optimizer, rho=rho, lr=learning_rate, momentum=0.9, weight_decay=5e-4)
+    # Initialize optimizer and criterion  
     criterion = torch.nn.CrossEntropyLoss()
     
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=epochs)
+    if use_sam:
+        base_optimizer = optim.SGD
+        optimizer = SAM(model.parameters(), base_optimizer, rho=rho, lr=learning_rate, momentum=0.9, weight_decay=5e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=epochs)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=5e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     
-    print("\nTraining Progress:")
+    print(f"\nTraining Progress ({'SAM' if use_sam else 'Regular'}):")
     pbar = tqdm(total=epochs, position=0)
+    
+    # Lists to store metrics
+    train_losses = []
+    train_accs = []
+    test_losses = []
+    test_accs = []
     
     # Training loop
     for epoch in range(epochs):
         train_loss, train_acc = train(model, trainloader, optimizer, criterion, device)
         test_loss, test_acc = test(model, testloader, criterion, device)
+        
+        # Store metrics
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
+        test_losses.append(test_loss)
+        test_accs.append(test_acc)
         
         print(f'Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
         
@@ -83,6 +108,29 @@ def main():
         scheduler.step()
     
     pbar.close()
+    
+    # Save results
+    results = {
+        'train_losses': train_losses,
+        'train_accs': train_accs,
+        'test_losses': test_losses,
+        'test_accs': test_accs,
+        'hyperparameters': {
+            'dataset': dataset,
+            'batch_size': batch_size,
+            'epochs': epochs,
+            'rho': rho,
+            'learning_rate': learning_rate,
+            'use_sam': use_sam
+        }
+    }
+    
+    # Save model and results
+    torch.save(model.state_dict(), os.path.join(run_dir, 'model.pth'))
+    torch.save(results, os.path.join(run_dir, 'results.pt'))
+    
+    print(f"\nResults saved in: {run_dir}")
 
 if __name__ == '__main__':
-    main()
+    # You can change use_sam to False for regular training
+    main(use_sam=False)
