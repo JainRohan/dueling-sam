@@ -9,6 +9,23 @@ import os
 from datetime import datetime
 
 class SAM(optim.Optimizer):
+    """
+    The SAM optimization problem can be written as: min_w max_{||ε||₂ ≤ ρ} L(w + ε).
+    where:
+    w are the model parameters
+    L is the loss function
+    ρ is the neighborhood size
+    ε is the perturbation vector.
+
+    The solution involves two steps:
+        1. Find the worst-case perturbation ε.
+        2. Update the parameters using this perturbation.
+
+    The initialization:
+        - Takes a base optimizer (like SGD)
+        - Sets the neighborhood size ρ 
+        - Initializes the base optimizer with the same parameters
+    """
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
         assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
         defaults = dict(rho=rho, **kwargs)
@@ -16,22 +33,40 @@ class SAM(optim.Optimizer):
         self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
         self.param_groups = self.base_optimizer.param_groups
 
+    """
+    This implements the first step of SAM:
+    
+    1. Calculates the gradient norm
+    2. For each parameter group:
+        a. Computes the scale factor as ρ/||∇L(w)||₂
+        b. Calculates the perturbation ε = ρ * ∇L(w)/||∇L(w)||₂
+        c. Adds the perturbation to the parameters
+        d. Stores the perturbation for the second step
+    """
     @torch.no_grad()
     def first_step(self, zero_grad=False):
         grad_norm = self._grad_norm()
         for group in self.param_groups:
+            # numerical stability with the 1e-12 term in the denominator
             scale = group["rho"] / (grad_norm + 1e-12)
             for p in group["params"]:
                 if p.grad is None: continue
+                # Math: ε = ρ * ∇L(w)/||∇L(w)||₂
                 e_w = p.grad * scale
                 p.add_(e_w)
                 self.state[p]["e_w"] = e_w
         if zero_grad: self.zero_grad()
 
+    """
+    This implements the second step:
+        1. Removes the perturbation from the parameters
+        2. Performs the actual parameter update using the base optimizer
+    """
     @torch.no_grad()
     def second_step(self, zero_grad=False):
         for group in self.param_groups:
             for p in group["params"]:
+                # Math: w = w - η * ∇L(w + ε)
                 if p.grad is None: continue
                 p.sub_(self.state[p]["e_w"])
         self.base_optimizer.step()
