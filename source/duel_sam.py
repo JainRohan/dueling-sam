@@ -60,7 +60,7 @@ class SAM(optim.Optimizer):
     """
     This implements the second step:
         1. Removes the perturbation from the parameters
-        2. Performs the actual parameter update using the base optimizer
+        2. Performs the actual parameter update using the base opti mizer
     """
     @torch.no_grad()
     def second_step(self, zero_grad=False):
