@@ -3,7 +3,7 @@
 import torch
 import torch.optim as optim
 from models import ResNet18
-from utils import get_cifar_data, train, test
+from utils import get_cifar_data, train, test, dueling_feedback_estimate
 from tqdm import tqdm
 import os
 from datetime import datetime
@@ -83,6 +83,44 @@ class SAM(optim.Optimizer):
         )
         return norm
 
+class DuelingSAM(optim.Optimizer):
+    def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
+        # Same as SAM
+        defaults = dict(rho=rho, **kwargs)
+        super().__init__(params, defaults)
+        self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
+        self.param_groups = self.base_optimizer.param_groups
+
+    @torch.no_grad()
+    def first_step(self, zero_grad=False, closure=None):
+        # closure: a function that returns the loss when called
+        for group in self.param_groups:
+            rho = group["rho"]
+            for p in group["params"]:
+                if p.grad is None: continue
+                def f(x):
+                    p_data = p.data.clone()
+                    p.data = x
+                    loss = closure()
+                    p.data = p_data
+                    return loss
+                # Estimate direction using dueling feedback
+                direction = dueling_feedback_estimate(f, p.data, h=1e-3, num_samples=20)
+                e_w = rho * direction
+                p.add_(e_w)
+                self.state[p]["e_w"] = e_w
+        if zero_grad: self.zero_grad()
+
+    @torch.no_grad()
+    def second_step(self, zero_grad=False):
+        # Same as SAM
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None: continue
+                p.sub_(self.state[p]["e_w"])
+        self.base_optimizer.step()
+        if zero_grad: self.zero_grad()
+
 def main(use_sam=True):
     outputs_dir = os.path.join(os.path.dirname(__file__), 'outputs')
     os.makedirs(outputs_dir, exist_ok=True)
@@ -114,10 +152,10 @@ def main(use_sam=True):
         optimizer = SAM(model.parameters(), base_optimizer, rho=rho, lr=learning_rate, momentum=0.9, weight_decay=5e-4)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=epochs)
     else:
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=5e-4)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        optimizer = DuelingSAM(model.parameters(), base_optimizer, rho=rho, lr=learning_rate, momentum=0.9, weight_decay=5e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.base_optimizer, T_max=epochs)
     
-    print(f"\nTraining Progress ({'SAM' if use_sam else 'Regular'}):")
+    print(f"\nTraining Progress ({'SAM' if use_sam else 'Dueling SAM'}):")
     pbar = tqdm(total=epochs, position=0)
     
     # Lists to store metrics
