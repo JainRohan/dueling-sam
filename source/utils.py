@@ -3,6 +3,8 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import numpy as np
+import torch.nn as nn
 
 def get_cifar_data(dataset='cifar10', batch_size=128):
     transform_train = transforms.Compose([
@@ -35,42 +37,38 @@ def get_cifar_data(dataset='cifar10', batch_size=128):
 
     return trainloader, testloader, num_classes
 
-def train(model, trainloader, optimizer, criterion, device):
+def train_epoch(model, dataloader, optimizer, device):
     model.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    running_loss = 0
+    loss_fn = nn.CrossEntropyLoss()
+    for X, y in dataloader:
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
+        pred = model(X)
+        loss = loss_fn(pred, y)
+        running_loss += loss.item()
+        loss.backward()
         
-        # Check if we're using SAM
-        is_sam = hasattr(optimizer, 'first_step')
-        
-        if is_sam:
-            # SAM training
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
+        # Handle different optimizer types
+        if optimizer.__class__.__name__ == 'SAM':
             optimizer.first_step(zero_grad=True)
-            
-            # Second forward-backward pass
-            criterion(model(inputs), targets).backward()
+            # Recompute loss and gradients at perturbed point
+            optimizer.zero_grad()
+            pred = model(X)
+            loss = loss_fn(pred, y)
+            loss.backward()
+            optimizer.second_step(zero_grad=True)
+        elif optimizer.__class__.__name__ == 'DuelingSAM':
+            optimizer.first_step(zero_grad=True, model=model, inputs=X, targets=y)
+            # Recompute loss and gradients at perturbed point
+            optimizer.zero_grad()
+            pred = model(X)
+            loss = loss_fn(pred, y)
+            loss.backward()
             optimizer.second_step(zero_grad=True)
         else:
-            # Regular training
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
             optimizer.step()
-        
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
-    
-    return train_loss/len(trainloader), 100.*correct/total
+    return running_loss / len(dataloader)
 
 def test(model, testloader, criterion, device):
     model.eval()
@@ -89,4 +87,45 @@ def test(model, testloader, criterion, device):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
     
-    return test_loss/len(testloader), 100.*correct/total 
+    return test_loss/len(testloader), 100.*correct/total
+
+# Dueling feedback estimator: estimates normalized gradient direction using function comparisons
+def dueling_feedback_estimate(f, x, rho=0.05, gamma=1e-2, num_samples=50, device=None):
+    """
+    Estimate the normalized gradient direction at x using Dueling Feedback for SAM.
+    1. Sample u, compute h_k using dueling feedback (inner step)
+    2. Compute x_adv = x + rho * h_k * u
+    3. Sample u', compute h_k' using dueling feedback at x_adv (outer step)
+    4. Accumulate h_k' * u' for grad_est, average over num_samples
+    Args:
+        f: function that takes a torch tensor and returns a scalar (loss)
+        x: torch tensor (current point)
+        rho: float, adversarial perturbation scale
+        gamma: float, dueling feedback step size
+        num_samples: int, number of random directions to average
+        device: torch device (optional)
+    Returns:
+        torch tensor, estimated normalized gradient direction (same shape as x)
+    """
+    x = x.detach()
+    if device is None:
+        device = x.device
+    grad_est = torch.zeros_like(x)
+    for _ in range(num_samples):
+        # Inner dueling feedback
+        u = torch.randn_like(x)
+        u = u / (u.norm() + 1e-12)
+        f_plus = f(x + gamma * u)
+        f_minus = f(x - gamma * u)
+        h_k = 2 * (1.0 if f_plus > f_minus else 0.0) - 1  # +1 or -1
+        # Adversarial point
+        x_adv = x + rho * h_k * u
+        # Outer dueling feedback
+        u_prime = torch.randn_like(x)
+        u_prime = u_prime / (u_prime.norm() + 1e-12)
+        f_plus_outer = f(x_adv + gamma * u_prime)
+        f_minus_outer = f(x_adv - gamma * u_prime)
+        h_k_prime = 2 * (1.0 if f_plus_outer > f_minus_outer else 0.0) - 1  # +1 or -1
+        grad_est += h_k_prime * u_prime
+    grad_est = grad_est / num_samples 
+    return grad_est 
