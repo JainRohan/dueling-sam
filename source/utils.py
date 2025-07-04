@@ -54,7 +54,7 @@ def train_epoch(model, dataloader, optimizer, device):
             optimizer.second_step(zero_grad=True, model=model, inputs=X, targets=y)
         else:
             # Standard training for other optimizers
-            loss = loss_fn(model(), y)
+            loss = loss_fn(model(X), y)
             running_loss += loss.item()
             loss.backward()
             
