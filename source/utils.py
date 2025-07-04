@@ -43,31 +43,32 @@ def train_epoch(model, dataloader, optimizer, device):
     loss_fn = nn.CrossEntropyLoss()
     for X, y in dataloader:
         X, y = X.to(device), y.to(device)
-        optimizer.zero_grad()
-        pred = model(X)
-        loss = loss_fn(pred, y)
-        running_loss += loss.item()
-        loss.backward()
-        
-        # Handle different optimizer types
-        if optimizer.__class__.__name__ == 'SAM':
-            optimizer.first_step(zero_grad=True)
-            # Recompute loss and gradients at perturbed point
-            optimizer.zero_grad()
-            pred = model(X)
-            loss = loss_fn(pred, y)
-            loss.backward()
-            optimizer.second_step(zero_grad=True)
-        elif optimizer.__class__.__name__ == 'DuelingSAM':
+
+        if optimizer.__class__.__name__ == 'DuelingSAM':
+            # For DuelingSAM, the optimizer steps do not use gradients.
+            with torch.no_grad():
+                pred = model(X)
+                loss = loss_fn(pred, y)
+                running_loss += loss.item()
+            
             optimizer.first_step(zero_grad=True, model=model, inputs=X, targets=y)
-            # Recompute loss and gradients at perturbed point
-            optimizer.zero_grad()
-            pred = model(X)
-            loss = loss_fn(pred, y)
-            loss.backward()
-            optimizer.second_step(zero_grad=True)
+            optimizer.second_step(zero_grad=True, model=model, inputs=X, targets=y)
         else:
-            optimizer.step()
+            # Standard training for other optimizers
+            loss = loss_fn(model(), y)
+            running_loss += loss.item()
+            loss.backward()
+            
+            # SAM requires two forward-backward passes.
+            if optimizer.__class__.__name__ == 'SAM':
+                optimizer.first_step(zero_grad=True)
+                loss_fn(model(X), y).backward()
+                optimizer.second_step(zero_grad=True)
+            else:
+                # Regular SGD training
+                optimizer.step()
+                optimizer.zero_grad()
+
     return running_loss / len(dataloader)
 
 def test(model, testloader, criterion, device):
@@ -128,4 +129,4 @@ def dueling_feedback_estimate(f, x, rho=0.05, gamma=1e-2, num_samples=50, device
         h_k_prime = 2 * (1.0 if f_plus_outer > f_minus_outer else 0.0) - 1  # +1 or -1
         grad_est += h_k_prime * u_prime
     grad_est = grad_est / num_samples 
-    return grad_est 
+    return grad_est
