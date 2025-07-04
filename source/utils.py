@@ -47,8 +47,7 @@ def train_epoch(model, dataloader, optimizer, device):
         if optimizer.__class__.__name__ == 'DuelingSAM':
             # For DuelingSAM, the optimizer steps do not use gradients.
             with torch.no_grad():
-                pred = model(X)
-                loss = loss_fn(pred, y)
+                loss = loss_fn(model(X), y)
                 running_loss += loss.item()
             
             optimizer.first_step(zero_grad=True, model=model, inputs=X, targets=y)
