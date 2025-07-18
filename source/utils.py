@@ -20,9 +20,9 @@ def get_cifar_data(dataset='cifar10', batch_size=128):
     ])
 
     if dataset == 'cifar10':
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+        trainset = torchvision.datasets.CIFAR10(root='/scratch/rjain/cifar10/', train=True,
                                               download=True, transform=transform_train)
-        testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+        testset = torchvision.datasets.CIFAR10(root='/scratch/rjain/cifar10/', train=False,
                                              download=True, transform=transform_test)
         num_classes = 10
     else:
